@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Own WMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#171a1f;--mute:#667085;--line:#e4e7ec;--brand:#1f6f5c;--brand-ink:#fff;--warn:#b54708;--bad:#b42318;--ok:#067647;--chip:#eef2f1}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#101214;--card:#181b1f;--ink:#eceef1;--mute:#98a2b3;--line:#2a2f36;--brand:#3fb596;--brand-ink:#08130f;--warn:#f79009;--bad:#f97066;--ok:#47cd89;--chip:#20262b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,system-ui,sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;font-weight:600}header .sp{flex:1}
+nav{display:flex;gap:2px;flex-wrap:wrap}nav button{background:none;border:0;padding:7px 12px;border-radius:8px;color:var(--mute);font:inherit;cursor:pointer}
+nav button.on{background:var(--chip);color:var(--ink);font-weight:600}
+main{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 12px;font-weight:600}
+.grid{display:grid;gap:12px}.g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.g2{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.kpi{padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--card)}.kpi b{display:block;font-size:24px;font-weight:600}.kpi span{color:var(--mute);font-size:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--mute);font-weight:500;white-space:nowrap}
+.tw{overflow-x:auto}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+label{display:block;font-size:12px;color:var(--mute);margin:0 0 4px}
+.btn{background:var(--brand);color:var(--brand-ink);border:0;border-radius:8px;padding:8px 14px;font:inherit;font-weight:500;cursor:pointer}
+.btn.ghost{background:var(--chip);color:var(--ink)}.btn.sm{padding:4px 9px;font-size:12px}.btn.bad{background:var(--bad);color:#fff}
+.chip{display:inline-block;padding:2px 8px;border-radius:99px;background:var(--chip);font-size:12px}
+.chip.ok{color:var(--ok)}.chip.warn{color:var(--warn)}.chip.bad{color:var(--bad)}
+.row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}.row>*{flex:1;min-width:130px}.row>.fit{flex:0 0 auto;min-width:0}
+.mute{color:var(--mute)}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+#auth{max-width:380px;margin:12vh auto;padding:0 16px}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;opacity:0;transition:.2s;pointer-events:none;max-width:90vw}
+#toast.show{opacity:1}
+pre{background:var(--chip);padding:10px;border-radius:8px;overflow:auto;font-size:12px}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="auth" class="hide">
+  <div class="card">
+    <h2 id="authTitle">Sign in to WMS</h2>
+    <div class="grid">
+      <div id="cnWrap" class="hide"><label>Company name</label><input id="cn"></div>
+      <div><label>Email</label><input id="em" type="email" autocomplete="email"></div>
+      <div><label>Password</label><input id="pw" type="password" autocomplete="current-password"></div>
+      <button class="btn" id="authGo">Sign in</button>
+      <button class="btn ghost" id="authSwap">New here? Create an account</button>
+      <div id="authMsg" class="mute"></div>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="hide">
+  <header>
+    <h1>Own WMS</h1>
+    <nav id="nav"></nav>
+    <div class="sp"></div>
+    <span class="mute" id="who"></span>
+    <button class="btn ghost sm" id="out">Sign out</button>
+  </header>
+  <main id="view"></main>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
+<script>
+const SUPABASE_URL = "https://lzwbgpolslygbiypjhpg.supabase.co";
+const SUPABASE_KEY = "sb_publishable_67PCg723xLMPZYOrLDfVfA_THLtEwVb"; // publishable key: safe in browser, RLS protects data
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let CID = null, SIGNUP = false, TAB = "dashboard";
+const API_BASE = SUPABASE_URL + "/functions/v1/wms-api";
+
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2800)}
+async function run(p){const r=await p;if(r.error){toast(r.error.message);throw r.error}return r.data}
+const chipFor = s => ({delivered:"ok",shipped:"ok",allocated:"ok",cancelled:"bad",on_hold:"warn",confirmed:"warn",rto_initiated:"bad",rto_received:"bad"}[s]||"");
+
+// ---------- Auth ----------
+$("#authSwap").onclick = () => { SIGNUP=!SIGNUP; $("#authTitle").textContent=SIGNUP?"Create your WMS account":"Sign in to WMS"; $("#authGo").textContent=SIGNUP?"Create account":"Sign in"; $("#authSwap").textContent=SIGNUP?"Have an account? Sign in":"New here? Create an account"; $("#cnWrap").classList.toggle("hide",!SIGNUP); };
+$("#authGo").onclick = async () => {
+  const email=$("#em").value.trim(), password=$("#pw").value; $("#authMsg").textContent="";
+  if(SIGNUP){
+    if(!$("#cn").value.trim()){$("#authMsg").textContent="Enter your company name.";return}
+    const {data,error}=await sb.auth.signUp({email,password});
+    if(error){$("#authMsg").textContent=error.message;return}
+    if(!data.session){$("#authMsg").textContent="Check your email to confirm, then sign in. Your company is created on first sign-in.";localStorage.setItem("pendingCompany",$("#cn").value.trim());return}
+    localStorage.setItem("pendingCompany",$("#cn").value.trim());
+  } else {
+    const {error}=await sb.auth.signInWithPassword({email,password});
+    if(error){$("#authMsg").textContent=error.message;return}
+  }
+  boot();
+};
+$("#out").onclick = async () => { await sb.auth.signOut(); boot(); };
+
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  $("#auth").classList.toggle("hide",!!session); $("#app").classList.toggle("hide",!session);
+  if(!session) return;
+  $("#who").textContent=session.user.email;
+  let {data:cu}=await sb.from("company_users").select("company_id,companies(name)").limit(1);
+  if(!cu?.length){
+    const name=localStorage.getItem("pendingCompany")||prompt("Company name?");
+    if(!name) return;
+    await run(sb.rpc("create_company",{p_name:name})); localStorage.removeItem("pendingCompany");
+    ({data:cu}=await sb.from("company_users").select("company_id,companies(name)").limit(1));
+  }
+  CID=cu[0].company_id; $("#who").textContent=cu[0].companies.name+" · "+session.user.email;
+  buildNav(); show(TAB);
+}
+
+const TABS=[["dashboard","Dashboard"],["orders","Orders"],["inventory","Inventory"],["skus","SKUs"],["inbound","Inbound"],["warehouses","Warehouses"],["settings","API & Webhooks"]];
+function buildNav(){ $("#nav").innerHTML=TABS.map(([k,l])=>`<button data-k="${k}" class="${k===TAB?"on":""}">${l}</button>`).join(""); $("#nav").onclick=e=>{const k=e.target.dataset.k;if(k)show(k)} }
+function show(k){ TAB=k; buildNav(); $("#view").innerHTML='<p class="mute">Loading…</p>'; views[k]().catch(e=>console.error(e)); }
+
+// ---------- Views ----------
+const views={
+async dashboard(){
+  const [o,inv,sk,wh]=await Promise.all([run(sb.from("orders").select("status")),run(sb.from("inventory_summary").select("available,reserved")),run(sb.from("skus").select("id",{count:"exact",head:true})),run(sb.from("warehouses").select("id",{count:"exact",head:true}))]);
+  const c=s=>o.filter(x=>x.status===s).length;
+  const sum=k=>inv.reduce((a,b)=>a+(+b[k]||0),0);
+  $("#view").innerHTML=`<div class="grid g4">
+   ${[["Total orders",o.length],["To allocate / pending",c("confirmed")],["Ready to pick",c("allocated")],["In pick/pack",c("picking")+c("packed")+c("manifested")],["Shipped",c("shipped")],["Delivered",c("delivered")],["Units available",sum("available")],["Units reserved",sum("reserved")]].map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join("")}</div>
+   <div class="card" style="margin-top:16px"><h2>Getting started</h2><ol class="mute"><li>Add a <b>warehouse</b></li><li>Add <b>SKUs</b></li><li>Receive stock via <b>Inbound → GRN</b> or an adjustment in <b>Inventory</b></li><li>Create an API key in <b>API &amp; Webhooks</b> and push orders from your store</li></ol></div>`;
+},
+
+async orders(){
+  const [rows,skus,whs]=await Promise.all([run(sb.from("orders").select("*,order_items(qty,skus(sku))").order("created_at",{ascending:false}).limit(200)),run(sb.from("skus").select("id,sku,name").eq("is_active",true)),run(sb.from("warehouses").select("id,code,name"))]);
+  const flow={confirmed:[["allocate","Allocate"]],allocated:[["picking","Start pick"]],picking:[["packed","Mark packed"]],packed:[["manifested","Manifest"]],manifested:[["shipped","Ship"]],shipped:[["delivered","Delivered"],["rto_initiated","RTO"]],rto_initiated:[["rto_received","RTO received"]]};
+  $("#view").innerHTML=`
+  <div class="card"><h2>Create order</h2>
+   <div class="row"><div><label>Order no.</label><input id="on" placeholder="BH-1001"></div><div><label>Warehouse</label><select id="ow">${whs.map(w=>`<option value="${w.id}">${esc(w.code)} — ${esc(w.name)}</option>`).join("")}</select></div>
+   <div><label>Payment</label><select id="op"><option value="prepaid">Prepaid</option><option value="cod">COD</option></select></div></div>
+   <div class="row" style="margin-top:8px"><div><label>Customer name</label><input id="cn1"></div><div><label>Phone</label><input id="cp"></div><div><label>Address</label><input id="ca"></div><div><label>City</label><input id="cc"></div><div><label>Pincode</label><input id="cz"></div></div>
+   <div class="row" style="margin-top:8px"><div><label>SKU</label><select id="os">${skus.map(s=>`<option value="${s.id}">${esc(s.sku)} — ${esc(s.name)}</option>`).join("")}</select></div><div><label>Qty</label><input id="oq" type="number" min="1" value="1"></div><div><label>Unit price</label><input id="opr" type="number" step="0.01"></div><div class="fit"><button class="btn" id="oc">Create order</button></div></div>
+   <p class="mute" style="margin:8px 0 0">One line item here; orders from your store via the API can have many.</p></div>
+  <div class="card"><h2>Orders (latest 200)</h2><div class="tw"><table><thead><tr><th>Order</th><th>Date</th><th>Customer</th><th>Items</th><th>Pay</th><th>Status</th><th>AWB</th><th></th></tr></thead><tbody>
+  ${rows.map(o=>`<tr><td><b>${esc(o.order_number)}</b><br><span class="mute">${esc(o.channel)}</span></td><td>${new Date(o.created_at).toLocaleString()}</td><td>${esc(o.customer?.name)}<br><span class="mute">${esc(o.shipping_address?.city)} ${esc(o.shipping_address?.pincode)}</span></td><td>${o.order_items.map(i=>`${esc(i.skus?.sku)} ×${i.qty}`).join("<br>")}</td><td>${esc(o.payment_mode)}</td><td><span class="chip ${chipFor(o.status)}">${esc(o.status)}</span></td><td class="mono">${esc(o.awb||"")}</td>
+  <td>${(flow[o.status]||[]).map(([a,l])=>`<button class="btn sm" data-a="${a}" data-id="${o.id}">${l}</button>`).join(" ")} ${["delivered","cancelled","rto_received","shipped","rto_initiated"].includes(o.status)?"":`<button class="btn sm ghost" data-a="cancelled" data-id="${o.id}">Cancel</button>`}</td></tr>`).join("")||`<tr><td colspan=8 class="mute">No orders yet.</td></tr>`}
+  </tbody></table></div></div>`;
+  $("#oc").onclick=async()=>{
+    const v=id=>$("#"+id).value.trim(); if(!v("on")||!v("cn1")||!v("ca")||!v("cz")||!$("#os").value||!$("#ow").value){toast("Fill order no., customer, address, pincode, SKU and warehouse");return}
+    const o=await run(sb.from("orders").insert({company_id:CID,order_number:v("on"),channel:"manual",warehouse_id:$("#ow").value,payment_mode:$("#op").value,customer:{name:v("cn1"),phone:v("cp")},shipping_address:{line1:v("ca"),city:v("cc"),pincode:v("cz"),country:"IN"}}).select("id").single());
+    await run(sb.from("order_items").insert({company_id:CID,order_id:o.id,sku_id:$("#os").value,qty:+v("oq"),unit_price:+v("opr")||null}));
+    const ok=await run(sb.rpc("allocate_order_ui",{p_order:o.id})); toast(ok?"Order created and stock allocated":"Order created — not enough stock to allocate"); show("orders");
+  };
+  $("#view").querySelector("tbody").onclick=async e=>{
+    const b=e.target.closest("button[data-a]"); if(!b) return; const a=b.dataset.a,id=b.dataset.id;
+    if(a==="allocate"){const ok=await run(sb.rpc("allocate_order_ui",{p_order:id}));toast(ok?"Allocated":"Not enough stock")}
+    else{let awb=null;if(a==="manifested"){awb=prompt("AWB number (optional)")||null}await run(sb.rpc("advance_order",{p_order:id,p_status:a,p_awb:awb}))}
+    show("orders");
+  };
+},
+
+async inventory(){
+  const [rows,skus,whs]=await Promise.all([run(sb.from("inventory_summary").select("*,skus(sku,name),warehouses(code)")),run(sb.from("skus").select("id,sku,name")),run(sb.from("warehouses").select("id,code"))]);
+  $("#view").innerHTML=`<div class="card"><h2>Stock adjustment</h2><div class="row">
+   <div><label>Warehouse</label><select id="aw">${whs.map(w=>`<option value="${w.id}">${esc(w.code)}</option>`).join("")}</select></div>
+   <div><label>SKU</label><select id="as">${skus.map(s=>`<option value="${s.id}">${esc(s.sku)}</option>`).join("")}</select></div>
+   <div><label>Qty (+ add / − remove)</label><input id="aq" type="number" value="0"></div>
+   <div><label>Reason</label><input id="an" placeholder="Opening stock, cycle count…"></div>
+   <div class="fit"><button class="btn" id="ab">Post</button></div></div></div>
+  <div class="card"><h2>Stock on hand</h2><div class="tw"><table><thead><tr><th>Warehouse</th><th>SKU</th><th>Name</th><th>Available</th><th>Reserved</th><th>Damaged</th><th>Quarantine</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr><td>${esc(r.warehouses?.code)}</td><td><b>${esc(r.skus?.sku)}</b></td><td>${esc(r.skus?.name)}</td><td>${r.available}</td><td>${r.reserved}</td><td>${r.damaged}</td><td>${r.quarantine}</td></tr>`).join("")||`<tr><td colspan=7 class="mute">No stock yet.</td></tr>`}</tbody></table></div></div>`;
+  $("#ab").onclick=async()=>{const q=+$("#aq").value;if(!q||!$("#aw").value||!$("#as").value){toast("Choose warehouse, SKU and a non-zero qty");return}
+    await run(sb.from("inventory_ledger").insert({company_id:CID,warehouse_id:$("#aw").value,sku_id:$("#as").value,qty_delta:q,bucket:"available",ref_type:"adjustment",note:$("#an").value||null}));toast("Posted");show("inventory")};
+},
+
+async skus(){
+  const rows=await run(sb.from("skus").select("*").order("sku"));
+  $("#view").innerHTML=`<div class="card"><h2>Add / update SKU</h2><div class="row">
+   <div><label>SKU code</label><input id="k1"></div><div><label>Name</label><input id="k2"></div><div><label>EAN</label><input id="k3"></div><div><label>HSN</label><input id="k4"></div><div><label>MRP</label><input id="k5" type="number" step="0.01"></div><div><label>Weight (g)</label><input id="k6" type="number"></div><div class="fit"><button class="btn" id="kb">Save</button></div></div></div>
+  <div class="card"><h2>SKU master</h2><div class="tw"><table><thead><tr><th>SKU</th><th>Name</th><th>EAN</th><th>HSN</th><th>MRP</th><th>Weight</th></tr></thead><tbody>${rows.map(s=>`<tr><td><b>${esc(s.sku)}</b></td><td>${esc(s.name)}</td><td>${esc(s.ean)}</td><td>${esc(s.hsn)}</td><td>${esc(s.mrp)}</td><td>${esc(s.weight_g)}</td></tr>`).join("")||`<tr><td colspan=6 class="mute">No SKUs yet.</td></tr>`}</tbody></table></div></div>`;
+  $("#kb").onclick=async()=>{const v=i=>$("#k"+i).value.trim();if(!v(1)||!v(2)){toast("SKU code and name are required");return}
+    await run(sb.from("skus").upsert({company_id:CID,sku:v(1),name:v(2),ean:v(3)||null,hsn:v(4)||null,mrp:+v(5)||null,weight_g:+v(6)||null},{onConflict:"company_id,sku"}));toast("Saved");show("skus")};
+},
+
+async warehouses(){
+  const rows=await run(sb.from("warehouses").select("*,locations(id)").order("code"));
+  $("#view").innerHTML=`<div class="card"><h2>Add warehouse</h2><div class="row"><div><label>Code</label><input id="w1" placeholder="BHIWANDI"></div><div><label>Name</label><input id="w2"></div><div class="fit"><button class="btn" id="wb">Add</button></div></div></div>
+  <div class="card"><h2>Warehouses</h2><table><thead><tr><th>Code</th><th>Name</th><th>Bins</th></tr></thead><tbody>${rows.map(w=>`<tr><td><b>${esc(w.code)}</b></td><td>${esc(w.name)}</td><td>${w.locations.length}</td></tr>`).join("")||`<tr><td colspan=3 class="mute">No warehouses yet.</td></tr>`}</tbody></table></div>`;
+  $("#wb").onclick=async()=>{const c=$("#w1").value.trim(),n=$("#w2").value.trim();if(!c||!n){toast("Code and name required");return}
+    await run(sb.from("warehouses").insert({company_id:CID,code:c,name:n}));show("warehouses")};
+},
+
+async inbound(){
+  const [pos,grns,skus,whs,vs]=await Promise.all([run(sb.from("purchase_orders").select("*,vendors(name),warehouses(code),purchase_order_items(qty_ordered,qty_received,skus(sku))").order("created_at",{ascending:false})),run(sb.from("grns").select("*,warehouses(code)").order("received_at",{ascending:false,nullsFirst:true}).limit(50)),run(sb.from("skus").select("id,sku")),run(sb.from("warehouses").select("id,code")),run(sb.from("vendors").select("id,name"))]);
+  $("#view").innerHTML=`<div class="card"><h2>Create purchase order</h2><div class="row">
+   <div><label>PO number</label><input id="p1"></div>
+   <div><label>Vendor</label><select id="p2"><option value="">— none —</option>${vs.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join("")}</select></div>
+   <div><label>New vendor name</label><input id="p2n" placeholder="optional"></div>
+   <div><label>Warehouse</label><select id="p3">${whs.map(w=>`<option value="${w.id}">${esc(w.code)}</option>`).join("")}</select></div>
+   <div><label>SKU</label><select id="p4">${skus.map(s=>`<option value="${s.id}">${esc(s.sku)}</option>`).join("")}</select></div>
+   <div><label>Qty</label><input id="p5" type="number" min="1" value="1"></div>
+   <div class="fit"><button class="btn" id="pb">Create PO</button></div></div></div>
+  <div class="card"><h2>Purchase orders</h2><div class="tw"><table><thead><tr><th>PO</th><th>Vendor</th><th>Warehouse</th><th>Lines</th><th>Status</th><th></th></tr></thead><tbody>
+  ${pos.map(p=>`<tr><td><b>${esc(p.po_number)}</b></td><td>${esc(p.vendors?.name)}</td><td>${esc(p.warehouses?.code)}</td><td>${p.purchase_order_items.map(i=>`${esc(i.skus?.sku)} ${i.qty_received}/${i.qty_ordered}`).join("<br>")}</td><td><span class="chip">${esc(p.status)}</span></td><td>${["open","partial"].includes(p.status)?`<button class="btn sm" data-po="${p.id}">Receive (GRN)</button>`:""}</td></tr>`).join("")||`<tr><td colspan=6 class="mute">No purchase orders yet.</td></tr>`}</tbody></table></div></div>
+  <div class="card"><h2>Recent GRNs</h2><table><thead><tr><th>GRN</th><th>Warehouse</th><th>Status</th><th>Received</th></tr></thead><tbody>${grns.map(g=>`<tr><td>${esc(g.grn_number)}</td><td>${esc(g.warehouses?.code)}</td><td><span class="chip ${g.status==="completed"?"ok":"warn"}">${esc(g.status)}</span></td><td>${g.received_at?new Date(g.received_at).toLocaleString():""}</td></tr>`).join("")||`<tr><td colspan=4 class="mute">None yet.</td></tr>`}</tbody></table></div>`;
+  $("#pb").onclick=async()=>{const no=$("#p1").value.trim();if(!no||!$("#p3").value||!$("#p4").value){toast("PO number, warehouse and SKU required");return}
+    let vendor=$("#p2").value||null;const vn=$("#p2n").value.trim();
+    if(vn){const v=await run(sb.from("vendors").insert({company_id:CID,name:vn}).select("id").single());vendor=v.id}
+    const p=await run(sb.from("purchase_orders").insert({company_id:CID,po_number:no,vendor_id:vendor,warehouse_id:$("#p3").value}).select("id").single());
+    await run(sb.from("purchase_order_items").insert({company_id:CID,po_id:p.id,sku_id:$("#p4").value,qty_ordered:+$("#p5").value}));show("inbound")};
+  $("#view").querySelectorAll("button[data-po]").forEach(b=>b.onclick=async()=>{
+    const po=pos.find(x=>x.id===b.dataset.po); const items=await run(sb.from("purchase_order_items").select("sku_id,qty_ordered,qty_received,skus(sku)").eq("po_id",po.id));
+    const lines=[];for(const i of items){const left=i.qty_ordered-i.qty_received;if(left<=0)continue;
+      const good=prompt(`${i.skus.sku}: good qty received (pending ${left})`,left);if(good===null)return;
+      const dmg=prompt(`${i.skus.sku}: damaged qty`,"0");if(dmg===null)return;lines.push({sku_id:i.sku_id,good:+good||0,dmg:+dmg||0})}
+    if(!lines.length)return;
+    const g=await run(sb.from("grns").insert({company_id:CID,grn_number:"GRN-"+Date.now().toString(36).toUpperCase(),po_id:po.id,warehouse_id:po.warehouse_id}).select("id").single());
+    await run(sb.from("grn_items").insert(lines.map(l=>({company_id:CID,grn_id:g.id,sku_id:l.sku_id,qty_good:l.good,qty_damaged:l.dmg}))));
+    await run(sb.rpc("complete_grn",{p_grn:g.id}));toast("GRN completed, stock updated");show("inbound")});
+},
+
+async settings(){
+  const [keys,hooks]=await Promise.all([run(sb.from("api_keys").select("id,label,key_prefix,is_active,last_used_at,created_at").order("created_at",{ascending:false})),run(sb.from("webhook_endpoints").select("*"))]);
+  const dl=await run(sb.from("webhook_deliveries").select("event,status,attempts,response_code,created_at").order("created_at",{ascending:false}).limit(10));
+  $("#view").innerHTML=`
+  <div class="card"><h2>API keys</h2><div class="row"><div><label>Label</label><input id="ka" placeholder="Shopify store"></div><div class="fit"><button class="btn" id="kb">Create key</button></div></div>
+   <div id="newkey"></div>
+   <div class="tw"><table><thead><tr><th>Label</th><th>Key</th><th>Last used</th><th>Active</th><th></th></tr></thead><tbody>${keys.map(k=>`<tr><td>${esc(k.label)}</td><td class="mono">${esc(k.key_prefix)}…</td><td>${k.last_used_at?new Date(k.last_used_at).toLocaleString():"never"}</td><td>${k.is_active?"Yes":"No"}</td><td>${k.is_active?`<button class="btn sm bad" data-k="${k.id}">Revoke</button>`:""}</td></tr>`).join("")||`<tr><td colspan=5 class="mute">No keys yet.</td></tr>`}</tbody></table></div></div>
+  <div class="card"><h2>Send orders to the WMS</h2><p class="mute">Send header <span class="mono">x-api-key: YOUR_KEY</span>. Orders are idempotent on <span class="mono">order_number</span>. Shopify <i>orders/create</i> payloads work on the webhook URL as-is.</p>
+   <pre>POST ${esc(API_BASE)}/orders          (generic JSON)
+POST ${esc(API_BASE)}/webhook/orders  (generic or Shopify format)
+GET  ${esc(API_BASE)}/orders/{order_number}
+POST ${esc(API_BASE)}/orders/{order_number}/cancel
+GET  ${esc(API_BASE)}/inventory?sku=CODE
+POST ${esc(API_BASE)}/skus
+
+{
+  "order_number": "BH-10045", "payment_mode": "cod", "order_total": 1499,
+  "customer": {"name": "Asha Rao", "phone": "98XXXXXX10"},
+  "shipping_address": {"line1": "12 MG Road", "city": "Pune", "state": "MH", "pincode": "411001"},
+  "items": [{"sku": "HEMP-OIL-30", "qty": 2, "unit_price": 749}]
+}</pre></div>
+  <div class="card"><h2>Outbound webhooks</h2><div class="row"><div><label>Endpoint URL (https)</label><input id="hu"></div><div><label>Signing secret</label><input id="hs" placeholder="long random string"></div><div class="fit"><button class="btn" id="hb">Add</button></div></div>
+   <table><thead><tr><th>URL</th><th>Active</th><th></th></tr></thead><tbody>${hooks.map(h=>`<tr><td>${esc(h.url)}</td><td>${h.is_active?"Yes":"No"}</td><td><button class="btn sm bad" data-h="${h.id}">Remove</button></td></tr>`).join("")||`<tr><td colspan=3 class="mute">None yet.</td></tr>`}</tbody></table>
+   <p class="mute">Events are queued on every order status change. Delivery runs when the dispatcher is scheduled (see README).</p>
+   <div class="tw"><table><thead><tr><th>Recent deliveries</th><th>Status</th><th>Attempts</th><th>HTTP</th></tr></thead><tbody>${dl.map(d=>`<tr><td>${esc(d.event)}</td><td>${esc(d.status)}</td><td>${d.attempts}</td><td>${esc(d.response_code??"")}</td></tr>`).join("")||`<tr><td colspan=4 class="mute">None yet.</td></tr>`}</tbody></table></div></div>`;
+  $("#kb").onclick=async()=>{const k=await run(sb.rpc("create_api_key",{p_company:CID,p_label:$("#ka").value.trim()||"API key"}));
+    $("#newkey").innerHTML=`<div class="card" style="border-color:var(--brand)"><b>Copy this key now — it won't be shown again:</b><pre>${esc(k)}</pre></div>`;};
+  $("#view").querySelectorAll("button[data-k]").forEach(b=>b.onclick=async()=>{await run(sb.from("api_keys").update({is_active:false}).eq("id",b.dataset.k));show("settings")});
+  $("#hb").onclick=async()=>{const u=$("#hu").value.trim(),s=$("#hs").value.trim();if(!/^https:\/\//.test(u)||s.length<12){toast("Use an https URL and a secret of 12+ characters");return}
+    await run(sb.from("webhook_endpoints").insert({company_id:CID,url:u,secret:s}));show("settings")};
+  $("#view").querySelectorAll("button[data-h]").forEach(b=>b.onclick=async()=>{await run(sb.from("webhook_endpoints").delete().eq("id",b.dataset.h));show("settings")});
+}};
+
+sb.auth.onAuthStateChange(()=>{});
+boot();
+</script>
+</body>
+</html>
